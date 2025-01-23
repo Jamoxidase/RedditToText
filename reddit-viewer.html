@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Reddit Thread Viewer</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a1b;
+            color: #d7dadc;
+        }
+
+        #fileInput {
+            width: 100%;
+            padding: 20px;
+            border: 2px dashed #343536;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+            background: #272729;
+            color: #d7dadc;
+        }
+
+        #content {
+            background: #1a1a1b;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            padding: 20px;
+        }
+
+        .post {
+            border-bottom: 1px solid #343536;
+            padding-bottom: 20px;
+            margin-bottom: 20px;
+        }
+
+        .post-title {
+            font-size: 24px;
+            font-weight: bold;
+            margin: 0 0 10px 0;
+            color: #d7dadc;
+        }
+
+        .post-meta {
+            color: #818384;
+            font-size: 14px;
+            margin-bottom: 15px;
+        }
+
+        .post-content {
+            line-height: 1.6;
+            margin-bottom: 20px;
+        }
+
+        .comments {
+            position: relative;
+        }
+
+        .comment-thread {
+            margin-left: 20px;
+            position: relative;
+        }
+
+        .comment {
+            padding: 10px 0 10px 15px;
+            margin: 10px 0;
+            position: relative;
+        }
+
+        /* Thread line styling */
+        .comment::before {
+            content: '';
+            position: absolute;
+            left: -2px;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: #343536;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .comment:hover::before {
+            background: #4a4a4b;
+        }
+
+        .comment-meta {
+            color: #818384;
+            font-size: 12px;
+            margin-bottom: 5px;
+            user-select: none;
+        }
+
+        .comment-content {
+            line-height: 1.5;
+            color: #d7dadc;
+        }
+
+        .score {
+            color: #4fbcff;
+            font-weight: bold;
+        }
+
+        .collapsed > .comment-content,
+        .collapsed > .comment-thread {
+            display: none;
+        }
+
+        /* Hover states */
+        .comment:hover {
+            background-color: #272729;
+        }
+
+        .comment-meta:hover {
+            color: #d7dadc;
+        }
+
+        /* Dark mode input file button */
+        input[type="file"]::-webkit-file-upload-button {
+            background: #272729;
+            color: #d7dadc;
+            border: 1px solid #343536;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        input[type="file"]::-webkit-file-upload-button:hover {
+            background: #343536;
+        }
+
+        /* Links */
+        a {
+            color: #4fbcff;
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <input type="file" id="fileInput" accept=".json">
+    <div id="content"></div>
+
+    <script>
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    renderThread(data);
+                } catch (error) {
+                    console.error('Error parsing JSON:', error);
+                }
+            };
+            reader.readAsText(file);
+        });
+
+        function formatDate(isoString) {
+            const date = new Date(isoString);
+            return date.toLocaleString();
+        }
+
+        function buildCommentTree(comments) {
+            const commentMap = new Map();
+            const rootComments = [];
+
+            comments.forEach(comment => {
+                comment.children = [];
+                commentMap.set(comment.id, comment);
+            });
+
+            comments.forEach(comment => {
+                const parentId = comment.parent_id.split('_')[1];
+                const parentComment = commentMap.get(parentId);
+                
+                if (parentComment) {
+                    parentComment.children.push(comment);
+                } else {
+                    rootComments.push(comment);
+                }
+            });
+
+            return rootComments;
+        }
+
+        function renderComment(comment) {
+            const html = `
+                <div class="comment" data-comment-id="${comment.id}">
+                    <div class="comment-meta">
+                        u/${escapeHtml(comment.author)} • 
+                        ${formatDate(comment.timestamp)} • 
+                        <span class="score">${comment.score} points</span>
+                    </div>
+                    <div class="comment-content">${escapeHtml(comment.content)}</div>
+                    ${comment.children.length > 0 ? '<div class="comment-thread"></div>' : ''}
+                </div>
+            `;
+            return html;
+        }
+
+        function renderThread(data) {
+            const contentDiv = document.getElementById('content');
+            
+            const postHtml = `
+                <div class="post">
+                    <h1 class="post-title">${escapeHtml(data.post.title)}</h1>
+                    <div class="post-meta">
+                        Posted by u/${escapeHtml(data.post.author)} • 
+                        ${formatDate(data.post.timestamp)} • 
+                        <span class="score">${data.post.score} points</span> 
+                        (${Math.round(data.post.upvote_ratio * 100)}% upvoted)
+                    </div>
+                    <div class="post-content">${escapeHtml(data.post.content)}</div>
+                </div>
+                <div class="comments"></div>
+            `;
+
+            contentDiv.innerHTML = postHtml;
+
+            const rootComments = buildCommentTree(data.comments);
+            const commentsContainer = contentDiv.querySelector('.comments');
+
+            function renderCommentTree(comments, container) {
+                comments.forEach(comment => {
+                    container.insertAdjacentHTML('beforeend', renderComment(comment));
+                    const commentElement = container.lastElementChild;
+                    
+                    if (comment.children.length > 0) {
+                        const threadContainer = commentElement.querySelector('.comment-thread');
+                        renderCommentTree(comment.children, threadContainer);
+                    }
+                });
+            }
+
+            renderCommentTree(rootComments, commentsContainer);
+
+            // Add click handlers for collapsing/expanding using thread lines
+            document.querySelectorAll('.comment').forEach(comment => {
+                comment.addEventListener('click', (e) => {
+                    // Check if click was on or near the thread line (left side)
+                    const rect = comment.getBoundingClientRect();
+                    const clickX = e.clientX - rect.left;
+                    
+                    // If click is within 20px of the left edge (thread line area)
+                    if (clickX <= 20) {
+                        comment.classList.toggle('collapsed');
+                        e.stopPropagation(); // Prevent triggering parent comments
+                    }
+                });
+            });
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
